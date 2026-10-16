@@ -1,0 +1,1 @@
+{ "name": "vedilm", "version": "2.0.0", "private": true, "description": "vedilm — project management (Jalali/Gregorian), zero-dependency Node server", "main": "server.js", "scripts": { "start": "node server.js" }, "engines": { "node": ">=18" } }
