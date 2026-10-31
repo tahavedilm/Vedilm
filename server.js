@@ -559,7 +559,7 @@ function applySync(user, ch) {
       const q = f.prefs, o = user.prefs || {};
       if (['fa', 'en', 'ar', 'zh'].includes(q.lang)) o.lang = q.lang;
       if (q.calSys === null || q.calSys === 'j' || q.calSys === 'g') o.calSys = q.calSys;
-      if (['auto', '0', '1', '6'].includes(String(q.weekStart))) o.weekStart = String(q.weekStart);
+      if (['auto', 'sat', 'sun', 'mon'].includes(String(q.weekStart))) o.weekStart = String(q.weekStart);
       for (const k of ['nAssigned', 'nDue', 'nComment']) if (typeof q[k] === 'boolean') o[k] = q[k];
       user.prefs = o;
     }
