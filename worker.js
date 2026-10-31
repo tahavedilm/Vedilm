@@ -3,7 +3,7 @@ import { DurableObject } from 'cloudflare:workers';
 import indexHtml from './index.html';
 import { makeSqlShim, handleFetch } from './adapter.js';
 
-const ENV_KEYS = ['SIGNUP_CODE', 'BASE_URL', 'SMTP_URL', 'MAIL_FROM', 'BACKUP_KEEP'];
+const ENV_KEYS = ['SIGNUP_CODE', 'BASE_URL', 'SMTP_URL', 'MAIL_FROM', 'BACKUP_KEEP', 'RESEND_API_KEY', 'GOOGLE_CLIENT_ID', 'GEMINI_API_KEY', 'GEMINI_MODEL', 'AI_GLOBAL_DAILY'];
 
 export class App extends DurableObject {
   constructor(ctx, env) {
