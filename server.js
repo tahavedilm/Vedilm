@@ -20,7 +20,7 @@ const STATUSES = ['todo', 'doing', 'review', 'done'], PRIOS = ['low', 'medium', 
 if (!CF) fs.mkdirSync(DATA_DIR, { recursive: true });
 const SQL_FILE = path.join(DATA_DIR, 'vedilm.sqlite');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
-const COLLECTIONS = ['users', 'sessions', 'invites', 'projects', 'tasks', 'events', 'notifs', 'activity', 'messages', 'tokens', 'work', 'invoices', 'leaves', 'reports', 'needs', 'peers'];
+const COLLECTIONS = ['users', 'sessions', 'invites', 'projects', 'tasks', 'events', 'notifs', 'activity', 'messages', 'tokens', 'work', 'invoices', 'leaves', 'reports', 'needs', 'peers', 'asks'];
 function emptyDB() { const d = { v: 2 }; COLLECTIONS.forEach(k => d[k] = []); return d; }
 var sqlite = null, sql = null;
 if (CF) { sqlite = { DatabaseSync: function () { return globalThis.__VEDILM_SQL; } }; }
@@ -185,7 +185,7 @@ function cleanOffer(o) {
 }
 function chatPeers(uid) { // team + people in an open offer discussion (private chat only)
   const s = teamOf(uid);
-  DB.invites.forEach(i => { if (i.status !== 'discussing') return; if (i.fromId === uid) s.add(i.toId); else if (i.toId === uid) s.add(i.fromId); });
+  DB.invites.forEach(i => { if (i.status !== 'discussing' && i.status !== 'settling') return; if (i.fromId === uid) s.add(i.toId); else if (i.toId === uid) s.add(i.fromId); });
   return s;
 }
 
@@ -499,9 +499,10 @@ const TASK_FIELDS = {
   spawned: v => typeof v === 'boolean' ? v : undefined,
   weight: v => Number.isFinite(+v) ? Math.min(100, Math.max(10, Math.round(+v))) : undefined,
   extra: v => typeof v === 'boolean' ? v : undefined,
+  reviewNote: v => str(v, 1000), reviewReply: v => str(v, 600), reviewAt: v => v === '' || (typeof v === 'string' && !isNaN(Date.parse(v))) ? v : undefined,
   backlog: v => typeof v === 'boolean' ? v : undefined,
 };
-const ASSIGNEE_FIELDS = ['status', 'order', 'completedAt', 'subtasks'];
+const ASSIGNEE_FIELDS = ['status', 'order', 'completedAt', 'subtasks', 'reviewNote', 'reviewAt'];
 
 function addDaysISO(iso, n) { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 function addMonthISO(iso) { const [y, m, d] = iso.split('-').map(Number); const t = new Date(Date.UTC(y, m, 1)); const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate(); t.setUTCDate(Math.min(d, last)); return t.toISOString().slice(0, 10); }
@@ -690,6 +691,16 @@ function applySync(user, ch) {
       if (f[k] === undefined) continue;
       if (!owner && !(assignee && ASSIGNEE_FIELDS.includes(k))) continue;
       const v = fn(f[k]); if (v !== undefined) ex[k] = v;
+    }
+    if (!owner && snap) { // assignees hand work in for review; only the manager closes a task
+      if (ex.status === 'done' && snap.status !== 'done') { ex.status = snap.status; ex.completedAt = snap.completedAt; rejected.push(['tasks', tk.id, 'review']); }
+      else if (ex.status === 'review' && snap.status !== 'review' && !(ex.reviewNote || '').trim()) { ex.status = snap.status; rejected.push(['tasks', tk.id, 'note']); }
+      else if (ex.status === 'review' && snap.status !== 'review') { ex.reviewAt = nowISO(); ex.reviewReply = ''; const o = userById(p.ownerId); if (o) pushNotif(o.id, { type: 'info', text: 'n.reviewReq', params: { name: user.name, t: ex.title }, link: 'taskreview', key: 'rv:' + ex.id + ':' + Date.now() }); touched.add('notifs'); }
+    }
+    if (owner && snap && snap.status === 'review' && ex.status !== 'review') { // manager's verdict
+      const kind = ex.status === 'done' ? 'n.reviewOk' : 'n.reviewNo';
+      ex.assigneeIds.forEach(a => { if (a !== p.ownerId) pushNotif(a, { type: 'info', text: kind, params: { t: ex.title }, link: 'task:' + ex.id, key: 'rvd:' + ex.id + ':' + Date.now() }); });
+      touched.add('notifs');
     }
     if (owner && Array.isArray(f.assigneeIds)) {
       const ok = new Set([p.ownerId, ...p.members.map(m => m.userId)]);
@@ -952,7 +963,13 @@ function invoiceLines(inv, period) {
     let ms = 0; Object.entries(days).forEach(([d, v]) => { const x = splitPay(o, v); base += x.amount; ms += v; });
     L.push({ k: 'base', label: 'hours', amount: base, meta: { ms } });
   } else {
-    base = o.amount || 0; L.push({ k: 'base', label: 'monthly', amount: base });
+    base = o.amount || 0;
+    if (inv.endedAt && periodOfDay(new Date(Date.parse(inv.endedAt) + 12600e3).toISOString().slice(0, 10)) === period) { // final month: pay only the days worked
+      const [jy, jm] = period.split('-').map(Number), endDay = g2j(...new Date(Date.parse(inv.endedAt) + 12600e3).toISOString().slice(0, 10).split('-').map(Number))[2];
+      const fromDay = inv.contract && inv.contract.startJ && inv.contract.startJ.slice(0, 7) === period ? +inv.contract.startJ.slice(8, 10) : 1;
+      const days = Math.max(1, endDay - fromDay + 1);
+      base = Math.round(base * Math.min(30, days) / 30); L.push({ k: 'base', label: 'prorated', amount: base, meta: { n: days } });
+    } else L.push({ k: 'base', label: 'monthly', amount: base });
     if (period === startP && inv.contract && inv.contract.adjAmount) L.push({ k: 'adj', label: 'adj', amount: inv.contract.adjAmount });
   }
   if (o.kind === 'agreed' && base > 0) { // unpaid leave days of this month come off the agreed salary
@@ -990,6 +1007,29 @@ function makeInvoice(inv, period) {
 function setInv(x, status, extra) {
   x.status = status; x.statusAt = nowISO(); x.history.push(Object.assign({ at: nowISO(), s: status }, extra || {}));
 }
+function checkSettled(inv) {
+  if (!inv || inv.status !== 'settling') return;
+  const mine = DB.invoices.filter(x => x.inviteId === inv.id);
+  if (mine.length && mine.every(x => x.status === 'settled')) {
+    inv.status = 'ended'; inv.settledAt = nowISO();
+    [inv.fromId, inv.toId].forEach(id => pushNotif(id, { type: 'info', text: 'n.settled', params: { name: (userById(inv.toId) || {}).name || '' }, link: 'invoices', key: 'st:' + inv.id }));
+  }
+}
+function startSeparation(inv, byId, kind) { // fire / mutual / resign: access ends now, money is settled through invoices
+  const emp = userById(inv.toId), now = Date.now();
+  inv.status = 'settling'; inv.endKind = kind; inv.endedAt = nowISO(); inv.endedBy = byId; delete inv.change; delete inv.scheduled;
+  removeLink(inv.fromId, inv.toId);
+  const a = activeSession(inv.toId); if (a) { stopSession(a, now, 'end'); sendTo(inv.toId, 'timer', {}); }
+  DB.work.filter(w => w.type === 'break' && w.userId === inv.toId && !w.end).forEach(w => { w.end = nowISO(); });
+  DB.leaves.forEach(l => { if (l.inviteId === inv.id && (l.status === 'pending' || (l.status === 'approved' && l.to >= todayTehran()))) { if (l.status === 'approved') releaseLeaveTasks(l); l.status = 'cancelled'; } });
+  DB.asks.forEach(q => { if (q.inviteId === inv.id && q.status === 'pending') { q.status = 'rejected'; q.reply = 'contract ended'; q.decidedAt = nowISO(); } });
+  const endP = periodOfDay(new Date(now + 12600e3).toISOString().slice(0, 10));
+  let p = inv.contract && inv.contract.startJ ? inv.contract.startJ.slice(0, 7) : endP;
+  for (let n = 0; n < 60 && p <= endP; n++, p = nextPeriod(p)) makeInvoice(inv, p);
+  pushNotif(inv.toId, { type: 'info', text: kind === 'fire' ? 'n.fired' : 'n.separated', params: { name: (userById(byId) || {}).name || '' }, link: 'invoices', key: 'sep:' + inv.id });
+  if (inv.fromId !== byId) pushNotif(inv.fromId, { type: 'info', text: 'n.separated', params: { name: (emp || {}).name || '' }, link: 'invoices', key: 'sepm:' + inv.id });
+  checkSettled(inv);
+}
 function makeInvoices() {
   const today = todayTehran(), cur = curPeriod(); let any = false;
   for (const inv of DB.invites) {
@@ -1005,7 +1045,7 @@ function makeInvoices() {
     if (!x.statusAt || (x.status !== 'sent' && x.status !== 'paid')) continue;
     if (Date.now() - Date.parse(x.statusAt) < INV_AUTO_DAYS * 86400e3) continue;
     if (x.status === 'sent') { setInv(x, 'confirmed', { auto: 1 }); pushNotif(x.managerId, { type: 'info', text: 'n.invAutoConfirm', params: { p: x.period }, link: 'invoices', key: 'iva:' + x.id }); }
-    else { setInv(x, 'settled', { auto: 1 }); pushNotif(x.managerId, { type: 'info', text: 'n.invAutoSettle', params: { p: x.period }, link: 'invoices', key: 'ivs:' + x.id }); }
+    else { setInv(x, 'settled', { auto: 1 }); pushNotif(x.managerId, { type: 'info', text: 'n.invAutoSettle', params: { p: x.period }, link: 'invoices', key: 'ivs:' + x.id }); checkSettled(DB.invites.find(i => i.id === x.inviteId)); }
     any = true;
   }
   if (any) { persist(); broadcast('changed', {}); }
@@ -1268,12 +1308,12 @@ async function handle(req, res) {
     persist(); broadcast('changed', {}); return send(res, 200, { ok: true });
   }
   if (p === '/api/contract/end' && m === 'POST') {
-    const b = await readBody(req), inv = DB.invites.find(i => i.id === String(b.inviteId || '') && i.status === 'accepted' && (i.fromId === user.id || i.toId === user.id));
+    const b = await readBody(req), inv = DB.invites.find(i => i.id === String(b.inviteId || '') && i.status === 'accepted' && i.fromId === user.id);
     if (!inv) return send(res, 404, { error: 'none' });
-    inv.status = 'ended'; inv.endedAt = nowISO(); inv.endedBy = user.id; delete inv.change; delete inv.scheduled;
-    pushNotif(inv.fromId === user.id ? inv.toId : inv.fromId, { type: 'info', text: 'n.contractEnded', params: { name: user.name }, link: 'team', key: 'ce:' + inv.id });
+    startSeparation(inv, user.id, b.kind === 'mutual' ? 'mutual' : 'fire');
     persist(); broadcast('changed', {}); return send(res, 200, { ok: true });
   }
+
   if (p === '/api/rate' && m === 'POST') {
     const b = await readBody(req), act = String(b.act || ''), inv = DB.invites.find(i => i.id === String(b.inviteId || '') && i.status === 'accepted' && i.offer && (i.fromId === user.id || i.toId === user.id));
     if (!inv) return send(res, 404, { error: 'none' });
@@ -1289,6 +1329,48 @@ async function handle(req, res) {
       if (b.ok) { inv.scheduled = { patch: ch.patch, from: ch.from > curPeriod() ? ch.from : nextPeriod(curPeriod()) }; }
       pushNotif(inv.fromId, { type: 'info', text: b.ok ? 'n.rateYes' : 'n.rateNo', params: { name: user.name }, link: 'requests', key: 'ra2:' + inv.id + ':' + ch.at });
     } else return send(res, 409, { error: 'state' });
+    persist(); broadcast('changed', {}); return send(res, 200, { ok: true });
+  }
+  /* ---------- employee requests (raise, advance, resignation, referral, ...) ---------- */
+  const ASK_TYPES = ['raise', 'advance', 'resign', 'schedule', 'equipment', 'refer', 'other'];
+  if (p === '/api/asks' && m === 'GET') {
+    const list = DB.asks.filter(q => q.userId === user.id || q.managerId === user.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 200).map(q => Object.assign({}, q, { userName: (userById(q.userId) || {}).name || '', target: q.targetUserId && q.managerId === user.id ? (userById(q.targetUserId) ? pubUser(userById(q.targetUserId), false) : null) : null }));
+    return send(res, 200, { asks: list });
+  }
+  if (p === '/api/ask' && m === 'POST') {
+    const b = await readBody(req), act = String(b.act || '');
+    if (act === 'create') {
+      const inv = DB.invites.find(i => i.id === String(b.inviteId || '') && i.toId === user.id && i.status === 'accepted' && i.offer);
+      const type = String(b.type || ''); if (!inv || !ASK_TYPES.includes(type)) return send(res, 400, { error: 'bad' });
+      const text = (str(b.text, 800) || '').trim(), amount = numIn(b.amount, 0, 1e11, 0);
+      if (type !== 'resign' && text.length < 2) return send(res, 400, { error: 'text' });
+      if ((type === 'raise' || type === 'advance') && !(amount > 0)) return send(res, 400, { error: 'amount' });
+      if (DB.asks.filter(q => q.userId === user.id && q.status === 'pending').length >= 15) return send(res, 429, { error: 'many' });
+      if (type === 'resign' && DB.asks.some(q => q.inviteId === inv.id && q.type === 'resign' && q.status === 'pending')) return send(res, 409, { error: 'dup' });
+      const q = { id: rid('k_'), inviteId: inv.id, userId: user.id, managerId: inv.fromId, type, text, amount: (type === 'raise' || type === 'advance') ? amount : 0, title: (str(b.title, 60) || '').trim(), status: 'pending', reply: '', createdAt: nowISO() };
+      if (type === 'refer') {
+        const digits = String(b.code || '').replace(/[^0-9۰-۹٠-٩]/g, '').replace(/[۰-۹]/g, c => String(c.charCodeAt(0) - 1776)).replace(/[٠-٩]/g, c => String(c.charCodeAt(0) - 1632));
+        const to = digits.length >= 6 ? DB.users.find(u => u.code === digits && u.role === 'employee' && u.id !== user.id) : null;
+        if (!to) return send(res, 404, { error: 'nouser' });
+        if (DB.invites.some(i => (i.fromId === inv.fromId && i.toId === to.id) && ['pending', 'accepted', 'discussing'].includes(i.status))) return send(res, 409, { error: 'dup' });
+        if (!q.title) return send(res, 400, { error: 'title' });
+        q.targetUserId = to.id;
+      }
+      DB.asks.push(q); pushNotif(inv.fromId, { type: 'info', text: 'n.askNew', params: { name: user.name }, link: 'requests', key: 'ak:' + q.id });
+    } else if (act === 'cancel') {
+      const q = DB.asks.find(x => x.id === String(b.id || '') && x.userId === user.id && x.status === 'pending'); if (!q) return send(res, 409, { error: 'state' });
+      DB.asks = DB.asks.filter(x => x !== q);
+    } else if (act === 'decide') {
+      const q = DB.asks.find(x => x.id === String(b.id || '') && x.managerId === user.id && x.status === 'pending'); if (!q) return send(res, 409, { error: 'state' });
+      const inv = DB.invites.find(i => i.id === q.inviteId && i.status === 'accepted');
+      q.status = b.ok ? 'approved' : 'rejected'; q.reply = (str(b.reply, 400) || '').trim(); q.decidedAt = nowISO();
+      if (b.ok && inv) {
+        if (q.type === 'raise') { const patch = inv.offer.kind === 'agreed' ? { amount: q.amount } : { rateN: q.amount }; inv.scheduled = { patch, from: nextPeriod(curPeriod()) }; }
+        else if (q.type === 'advance') { inv.manual = inv.manual || {}; const per = curPeriod(); (inv.manual[per] = inv.manual[per] || []).push({ id: rid('x_'), label: 'پیش‌پرداخت (Advance)', amount: -q.amount }); }
+        else if (q.type === 'resign') { startSeparation(inv, user.id, 'resign'); }
+      }
+      pushNotif(q.userId, { type: 'info', text: b.ok ? 'n.askYes' : 'n.askNo', params: { name: user.name }, link: 'requests', key: 'akd:' + q.id });
+    } else return send(res, 400, { error: 'act' });
     persist(); broadcast('changed', {}); return send(res, 200, { ok: true });
   }
   /* live payroll statement (current month) */
@@ -1343,13 +1425,14 @@ async function handle(req, res) {
     } else if (act === 'revise' && mgr && st === 'disputed') {
       setInv(x, 'draft', { revised: 1 });
     } else if (act === 'paid' && mgr && st === 'confirmed') {
+      { const ivx = DB.invites.find(i => i.id === x.inviteId) || {}; if (ivx.status === 'accepted' && todayTehran() <= periodEndG(x.period)) return send(res, 409, { error: 'early' }); } // salary is paid only once its month has ended
       const o = offerFor(DB.invites.find(i => i.id === x.inviteId) || {}, x.period) || {}, today = todayTehran();
       if (x.due && today > x.due && o.lateDay > 0) { const days = dayNo(today) - dayNo(x.due); x.lines.push({ k: 'late', label: 'lateDmg', amount: days * o.lateDay, meta: { days } }); x.lateDays = days; }
       setInv(x, 'paid'); pushNotif(x.userId, { type: 'info', text: 'n.invPaid', params: { p: x.period }, link: 'invoices', key: 'ivp:' + x.id });
     } else if (act === 'received' && emp && st === 'paid') {
       setInv(x, 'settled'); pushNotif(x.managerId, { type: 'info', text: 'n.invReceived', params: { name: user.name, p: x.period }, link: 'invoices', key: 'ivr:' + x.id });
     } else return bad();
-    x.total = invTotal(x.lines); persist(); broadcast('changed', {});
+    x.total = invTotal(x.lines); checkSettled(DB.invites.find(i => i.id === x.inviteId)); persist(); broadcast('changed', {});
     return send(res, 200, { ok: true });
   }
   if (process.env.VEDILM_TEST && p === '/api/_test/invoice' && m === 'POST') {
@@ -1428,6 +1511,15 @@ async function handle(req, res) {
     pushNotif(user.id, { type: 'info', text: 'n.planOn.' + tier, params: {}, link: 'profile', key: 'plan:' + now });
     persist(); broadcast('changed', {});
     return send(res, 200, planView(user));
+  }
+  if (m === 'GET' && p === '/api/profile-stats') {
+    const id = String(url.searchParams.get('id') || ''), o = userById(id);
+    if (!o || (id !== user.id && !DB.invites.some(i => (i.fromId === user.id && i.toId === id) || (i.toId === user.id && i.fromId === id)))) return send(res, 404, { error: 'none' });
+    const done = DB.tasks.filter(x => x.status === 'done' && x.assigneeIds.includes(id)).length;
+    const projs = new Set(); DB.projects.forEach(pr => { if (pr.ownerId === id || pr.members.some(mm => mm.userId === id)) projs.add(pr.id); });
+    const invs = DB.invites.filter(i => i.toId === id && i.offer), warns = invs.reduce((a, i) => a + (i.taskWarn || 0), 0);
+    const fines = DB.work.filter(w => w.type === 'fine' && w.userId === id).length;
+    return send(res, 200, { done, projects: projs.size, warns, fines, errorFree: !warns && !fines, bio: o.bio || '', title: o.title || '', since: o.createdAt });
   }
   if (m === 'GET' && p === '/api/users/search') {
     const q = String(url.searchParams.get('q') || '').trim().toLowerCase();
