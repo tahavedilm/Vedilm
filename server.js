@@ -397,9 +397,17 @@ function authOf(req) {
 }
 
 /* ---------------- state views ---------------- */
+function geoOf(req) {
+  const c = String(req.headers['cf-ipcountry'] || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+  const AR = ['AE', 'SA', 'QA', 'KW', 'BH', 'OM', 'JO', 'IQ', 'EG', 'LB', 'SY', 'YE', 'LY', 'DZ', 'MA', 'TN', 'SD', 'PS'];
+  const lang = c === 'IR' ? 'fa' : (c === 'CN' || c === 'TW' || c === 'HK' || c === 'MO') ? 'zh' : AR.includes(c) ? 'ar' : c ? 'en' : '';
+  return { country: c, lang, cur: c === 'IR' ? 'IRT' : c === 'AE' ? 'AED' : c === 'CN' ? 'CNY' : c ? 'USD' : '' };
+}
+const CUR_CODES = ['IRT', 'USD', 'AED', 'CNY'], LANG_CUR = { fa: 'IRT', en: 'USD', ar: 'AED', zh: 'CNY' };
 function pubUser(u, full) {
   const o = { id: u.id, code: u.code || '', tier: planState(u).tier, verified: u.verified !== false, name: u.name, email: u.email, role: u.role, title: u.title || '', phone: full ? (u.phone || '') : '', bio: full ? (u.bio || '') : '', avatar: u.avatar || '', createdAt: u.createdAt };
   const p = u.prefs || {};
+  o.cur = CUR_CODES.includes(p.cur) ? p.cur : (LANG_CUR[p.lang] || 'IRT');
   o.prefs = full ? p : { nAssigned: p.nAssigned !== false, nDue: p.nDue !== false, nComment: p.nComment !== false };
   return o;
 }
@@ -568,6 +576,7 @@ function applySync(user, ch) {
     if (isObj(f.prefs)) {
       const q = f.prefs, o = user.prefs || {};
       if (['fa', 'en', 'ar', 'zh'].includes(q.lang)) o.lang = q.lang;
+      if (CUR_CODES.includes(q.cur)) o.cur = q.cur;
       if (q.calSys === null || q.calSys === 'j' || q.calSys === 'g') o.calSys = q.calSys;
       if (['auto', 'sat', 'sun', 'mon'].includes(String(q.weekStart))) o.weekStart = String(q.weekStart);
       for (const k of ['nAssigned', 'nDue', 'nComment']) if (typeof q[k] === 'boolean') o[k] = q[k];
@@ -1079,7 +1088,8 @@ async function handle(req, res) {
   if (!rateOk(clientIp(req))) return send(res, 429, { error: 'rate' });
   if (m === 'GET' && (p === '/' || p === '/index.html')) { try { return send(res, 200, globalThis.__VEDILM_INDEX ? Buffer.from(globalThis.__VEDILM_INDEX) : fs.readFileSync(INDEX)); } catch (e) { return send(res, 500, { error: 'index missing' }); } }
   if (!p.startsWith('/api/')) return send(res, 404, { error: 'not found' });
-  if (m === 'GET' && p === '/api/health') return send(res, 200, { app: 'vedilm', v: 2, mail: MAIL.enabled, invite: !!process.env.SIGNUP_CODE, gid: GOOGLE_CLIENT_ID(), ai: !!aiKey() });
+  if (m === 'GET' && p === '/api/geo') return send(res, 200, geoOf(req));
+  if (m === 'GET' && p === '/api/health') return send(res, 200, { app: 'vedilm', v: 2, geo: geoOf(req).lang, mail: MAIL.enabled, invite: !!process.env.SIGNUP_CODE, gid: GOOGLE_CLIENT_ID(), ai: !!aiKey() });
 
   /* ----- public auth endpoints ----- */
   if (m === 'POST' && p === '/api/register') {

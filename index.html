@@ -1331,7 +1331,7 @@ Object.assign(DICT,{
 
 /* ===== dictionary part 4: job offers, contracts, employee profile =====  [fa,en,ar,zh] */
 Object.assign(DICT,{
-'cur':['تومان','Toman','تومان','土曼'],
+
 'pd.0':['شنبه','Sat','السبت','周六'],
 'pd.1':['یکشنبه','Sun','الأحد','周日'],
 'pd.2':['دوشنبه','Mon','الاثنين','周一'],
@@ -1911,6 +1911,16 @@ Object.assign(DICT,{
 'pf.clean':["بدون خطا", "Error-free", "بلا أخطاء", "无错误"],
 'pf.errs':["{n} خطا", "{n} errors", "{n} أخطاء", "{n} 个错误"],
 'pf.record':["سابقه", "Record", "السجل", "记录"],
+'cur.IRT':["تومان", "Toman", "تومان", "土曼"],
+'cur.USD':["دلار", "USD", "دولار", "美元"],
+'cur.AED':["درهم", "AED", "درهم", "迪拉姆"],
+'cur.CNY':["یوان", "CNY", "元", "人民币元"],
+'cur.IRT.n':["تومان ایران (IRT)", "Iranian Toman (IRT)", "التومان الإيراني (IRT)", "伊朗土曼 (IRT)"],
+'cur.USD.n':["دلار آمریکا (USD)", "US Dollar (USD)", "الدولار الأمريكي (USD)", "美元 (USD)"],
+'cur.AED.n':["درهم امارات (AED)", "UAE Dirham (AED)", "الدرهم الإماراتي (AED)", "阿联酋迪拉姆 (AED)"],
+'cur.CNY.n':["یوان چین (CNY)", "Chinese Yuan (CNY)", "اليوان الصيني (CNY)", "人民币 (CNY)"],
+'set.currency':["واحد پول", "Currency", "العملة", "货币"],
+'set.currency.d':["به‌طور پیش‌فرض با زبان تغییر می‌کند. مبالغ تبدیل نمی‌شوند، فقط واحد نمایش عوض می‌شود. مبلغ پلن‌ها تقریبی است.", "Defaults to your language. Amounts are not converted, only the unit changes. Plan prices are approximate.", "تتبع اللغة افتراضياً. لا تُحوَّل المبالغ، تتغير الوحدة فقط. أسعار الباقات تقريبية.", "默认随语言变化。金额不换算，仅更改单位。套餐价格为近似值。"],
 });
 
 /* ===== i18n runtime, formatting, overlays, toast, datepicker ===== */
@@ -2126,7 +2136,7 @@ async function detectServer(){
   try{
     const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),2500);
     const r=await fetch('/api/health',{signal:ac.signal,cache:'no-store'});clearTimeout(tm);
-    const d=await r.json();SRV.mail=!!(d&&d.mail);SRV.invite=!!(d&&d.invite);SRV.gid=(d&&d.gid)||'';SRV.ai=!!(d&&d.ai);return !!(d&&d.app==='vedilm');
+    const d=await r.json();SRV.mail=!!(d&&d.mail);SRV.invite=!!(d&&d.invite);SRV.gid=(d&&d.gid)||'';SRV.ai=!!(d&&d.ai);if(d&&d.geo&&!localStorage.getItem('vedilm_ui_lang')&&LANGIDX[d.geo]!=null){LANG=d.geo;applyLang()}return !!(d&&d.app==='vedilm');
   }catch(e){return false}
 }
 
@@ -3241,6 +3251,7 @@ function viewSettings(){
   const pf=prefs(),row=(title,desc,ctl)=>`<div class="li" style="padding:14px 0"><div class="grow"><div class="t">${esc(title)}</div>${desc?`<div class="xs muted">${esc(desc)}</div>`:''}</div>${ctl}</div>`;
   return pageHead(t('nav.settings'),t('set.sub'))+`<div style="display:grid;gap:16px;max-width:760px">
   <section class="card"><div class="card-h"><h3>${esc(t('set.appearance'))}</h3></div>${row(t('theme'),'',`<div class="seg" role="group">${['light','dark','system'].map(v=>`<button type="button" aria-pressed="${THEME===v}" data-act="set-theme" data-v="${v}">${esc(t('theme.'+v))}</button>`).join('')}</div>`)}${row(t('language'),'',langSelect())}</section>
+  <section class="card"><div class="card-h"><h3>${esc(t('set.currency'))}</h3></div>${row(t('set.currency'),t('set.currency.d'),`<select class="select" data-ch="cur-set" aria-label="${esc(t('set.currency'))}">${Object.keys(CURS).map(c=>`<option value="${c}" ${ownCur()===c?'selected':''}>${esc(t('cur.'+c+'.n'))}</option>`).join('')}</select>`)}</section>
   <section class="card"><div class="card-h"><h3>${esc(t('set.calendar'))}</h3></div>${row(t('set.defCal'),t('set.defCal.d'),`<div class="seg" role="group">${[['j','cal.j'],['g','cal.g']].map(([v,k])=>`<button type="button" aria-pressed="${calSys()===v}" data-act="cal-sys" data-sys="${v}">${esc(t(k))}</button>`).join('')}</div>`)}${row(t('set.weekStart'),'',`<select class="select" style="width:auto" data-ch="week-start">${[['auto','set.auto'],['sat','wd.sat'],['sun','wd.sun'],['mon','wd.mon']].map(([v,k])=>`<option value="${v}" ${pf.weekStart===v?'selected':''}>${esc(t(k))}</option>`).join('')}</select>`)}</section>
   <section class="card"><div class="card-h"><h3>${esc(t('set.notifs'))}</h3></div>${row(t('set.nAssigned'),'',sw('nAssigned',pf.nAssigned))}${row(t('set.nDue'),t('set.nDue.d'),sw('nDue',pf.nDue))}${row(t('set.nComment'),'',sw('nComment',pf.nComment))}</section>
   <section class="card"><div class="card-h"><h3>${esc(t('set.data'))}</h3></div><p class="muted small" style="margin-bottom:12px">${esc(t('set.data.d'))}</p><div class="row"><button class="btn" data-act="export-json">${ic('dl','sm')}${esc(t('set.export'))}</button><button class="btn" data-act="import-json">${ic('ul','sm')}${esc(t('set.import'))}</button><input type="file" id="impfile" accept="application/json,.json" hidden>${isMgr()?`<button class="btn" data-act="load-sample">${esc(t('sample.load'))}</button><button class="btn" data-act="remove-sample">${esc(t('sample.remove'))}</button>`:''}</div></section></div>`;
@@ -3306,7 +3317,15 @@ function sessionsCard(){
 }
 
 /* ===== payroll phase 1: job offers, contracts, employee profile ===== */
-const fmtMoney=n=>{let s=Math.round(Number(n)||0).toLocaleString('en-US');if(LANG==='fa')s=s.replace(/,/g,'٬');return num(s)+' '+t('cur')};
+const CURS={IRT:{r:1},USD:{r:1/150000},AED:{r:1/550000},CNY:{r:1/21000}};
+const LANG_CUR={fa:'IRT',en:'USD',ar:'AED',zh:'CNY'};
+const curOk=c=>c&&CURS[c]?c:null;
+function ownCur(){const u=me();return curOk(u&&u.prefs&&u.prefs.cur)||LANG_CUR[LANG]||'IRT'}
+/* currency shown for money: managers use their own setting, employees the currency of their manager's contract */
+function effCur(){const u=me();if(u&&u.role==='employee'){const i=db.invites.find(x=>x.toId===u.id&&x.status!=='declined'&&x.offer&&['accepted','settling','ended'].includes(x.status));const m=i&&userById(i.fromId);if(m&&curOk(m.cur))return m.cur}return ownCur()}
+const fmtNum=n=>{let s=n.toLocaleString('en-US',{maximumFractionDigits:0});if(LANG==='fa')s=s.replace(/,/g,'٬');return num(s)};
+const fmtMoney=n=>fmtNum(Math.round(Number(n)||0))+' '+t('cur.'+effCur());
+const fmtPlan=n=>{const c=ownCur(),v=(Number(n)||0)*CURS[c].r;return fmtNum(Math.round(v))+' '+t('cur.'+c)};
 const toNum=s=>{s=String(s||'').replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d));return parseInt(s.replace(/[^\d]/g,''),10)||0};
 const OFFER_DEF={kind:'agreed',amount:0,rateN:200000,rateO:300000,overMax:3,payDay:10,lateDay:0,hoursMode:'month',hoursMonth:140,dailyHours:7,workdays:[0,1,2,3,4,5],desc:'',fines:{lateTask:100000,earlyBonus:100000,meeting:200000,presence:200000,taskPct:10}};
 function dayNames(a){return (a||[]).map(i=>t('pd.'+i)).join('، ')}
@@ -3361,7 +3380,7 @@ function readOffer(w){
 }
 function openInviteModal(editId){
   const u=me(),ed=editId?db.invites.find(i=>i.id===editId&&i.fromId===u.id):null;
-  const o=JSON.parse(JSON.stringify(ed&&ed.offer?ed.offer:OFFER_DEF));if(ed)o._pid=ed.projectId||'';
+  const o=JSON.parse(JSON.stringify(ed&&ed.offer?ed.offer:OFFER_DEF));if(!ed&&effCur()!=='IRT'){const k=CURS[effCur()].r,sc=v=>Math.max(1,Math.round(v*k));o.rateN=sc(o.rateN);o.rateO=sc(o.rateO);Object.keys(o.fines).forEach(f=>{if(f!=='taskPct')o.fines[f]=sc(o.fines[f])})}if(ed)o._pid=ed.projectId||'';
   const search=ed?'':`<div class="field"><label for="iq">${esc(t('team.search'))}</label><div class="searchbox">${ic('search','sm')}<input class="input" id="iq" data-in="invite-q" autocomplete="off" placeholder="${esc(t('team.searchPh'))}"></div></div><div id="iresults" style="max-height:220px;overflow:auto;margin-bottom:12px"></div>`;
   const w=openOverlay(modalShell({title:ed?t('of.edit'):t('of.title'),cls:'wide',body:`${search}<div id="pform" hidden><div class="field"><label for="pit">${esc(t('peer.reqTitle'))} *</label><input class="input" id="pit" maxlength="60"></div><p class="muted small">${esc(t('peer.hint'))}</p></div><div id="iform" ${ed?'':'hidden'}>${offerFormHTML(o,ed&&ed.title)}</div><div class="msg" id="ierr" style="color:var(--bad);font-size:13px"></div>`,footer:`<button class="btn" type="button" data-act="close-ov">${esc(t('cancel'))}</button><button class="btn primary" type="button" id="isend" data-act="invite-send" ${ed?'':'disabled'}>${esc(ed?t('of.save'):t('of.send'))}</button>`}),{focus:ed?'#it':'#iq'});
   w._sel=ed?ed.toId:null;w._edit=ed?ed.id:null;w._kind=o.kind;w._hmode=o.hoursMode;
@@ -4012,11 +4031,11 @@ const projLocked=id=>{const p=projById(id);return !!(p&&p.locked)};
 /* ----- landing pricing block ----- */
 function pricingSection(){
   const card=(tier,pop)=>`<article class="card plan ${pop?'pop':''}">${pop?`<span class="badge primary" style="align-self:flex-start">${esc(t('plan.popular'))}</span>`:''}<h3>${esc(planName(tier))}</h3>
-    <div class="price" style="font-size:22px;line-height:1.5">${tier==='free'?esc(t('pl2.free0')):esc(t('pl2.mo',{n:fmtMoney(perMonth('manager',tier))}))}</div>
+    <div class="price" style="font-size:22px;line-height:1.5">${tier==='free'?esc(t('pl2.free0')):esc(t('pl2.mo',{n:fmtPlan(perMonth('manager',tier))}))}</div>
     <ul>${featList('manager',tier)}</ul><a class="btn ${pop?'primary':''} block" href="#/plans">${esc(t('pl2.more'))}</a></article>`;
   return `<section class="wrap sec center" id="pricing"><h2>${esc(t('pricing.title'))}</h2><p class="lead">${esc(t('pricing.lead'))}</p>
     <div class="plans">${card('free')}${card('pro',true)}${card('org')}</div>
-    <p class="muted" style="margin-top:18px">${esc(t('pl2.forEmp'))}: ${esc(t('plan.free'))} · ${esc(t('plan.pro'))} (${esc(t('pl2.mo',{n:fmtMoney(perMonth('employee','pro'))}))})</p></section>`;
+    <p class="muted" style="margin-top:18px">${esc(t('pl2.forEmp'))}: ${esc(t('plan.free'))} · ${esc(t('plan.pro'))} (${esc(t('pl2.mo',{n:fmtPlan(perMonth('employee','pro'))}))})</p></section>`;
 }
 
 /* ----- public plans page ----- */
@@ -4034,7 +4053,7 @@ function viewPlans(){
     const paid=tier!=='free',price=paid?PLAN_PRICE[role][tier][per]:0,sv=paid&&per!=='1m'?saveAmt(role,tier,per):0;
     const isCur=cur&&((cur.tier===tier)||(tier==='free'&&!cur.active));
     return `<article class="card plan ${tier==='pro'?'pop':''}">${tier==='pro'?`<span class="badge primary" style="align-self:flex-start">${esc(t('plan.popular'))}</span>`:''}<h3>${esc(planName(tier))}</h3>
-      <div class="price" style="font-size:22px;line-height:1.5">${paid?fmtMoney(price):esc(t('pl2.free0'))}<small class="muted" style="font-size:13px;font-weight:500;display:block">${paid?esc(t('pl2.per.'+per)):''}${sv?` · ${esc(t('pl2.save',{n:fmtMoney(sv)}))}`:''}</small></div>
+      <div class="price" style="font-size:22px;line-height:1.5">${paid?fmtPlan(price):esc(t('pl2.free0'))}<small class="muted" style="font-size:13px;font-weight:500;display:block">${paid?esc(t('pl2.per.'+per)):''}${sv?` · ${esc(t('pl2.save',{n:fmtPlan(sv)}))}`:''}</small></div>
       <ul>${featList(role,tier)}</ul>
       ${isCur?`<span class="badge ok" style="align-self:flex-start">${esc(t('pl2.current'))}</span>`:''}
       <button class="btn ${tier==='pro'?'primary':''} block" data-act="plan-buy" data-tier="${tier}" data-role="${role}">${esc(paid?t('pl2.buy'):t('pl2.startFree'))}</button></article>`}).join('');
@@ -4102,12 +4121,12 @@ function viewBuy(step){
     return `${stepsBar(1)}<form class="card" data-form="piBuy" novalidate style="max-width:680px"><div class="card-h"><h3>${esc(t('buy.step1'))}</h3></div>${piFields(PLANST.pi)}<div class="row" style="margin-top:8px"><button class="btn primary" type="submit">${esc(t('pi.saveGo'))}</button></div></form>`;
   }
   const role=u.role,tier=BUY.tier,per=BUY.per&&PLAN_PRICE[role][tier][BUY.per]?BUY.per:'1m';
-  const pers=PLAN_PERS.map(p=>`<label class="check" style="display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid ${p===per?'var(--primary)':'var(--line)'};border-radius:12px;margin-bottom:8px"><span><input type="radio" name="per" value="${p}" ${p===per?'checked':''} data-ch="buy-per"> ${esc(t('pl2.per.'+p))}</span><b>${fmtMoney(PLAN_PRICE[role][tier][p])}</b></label>`).join('');
+  const pers=PLAN_PERS.map(p=>`<label class="check" style="display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid ${p===per?'var(--primary)':'var(--line)'};border-radius:12px;margin-bottom:8px"><span><input type="radio" name="per" value="${p}" ${p===per?'checked':''} data-ch="buy-per"> ${esc(t('pl2.per.'+p))}</span><b>${fmtPlan(PLAN_PRICE[role][tier][p])}</b></label>`).join('');
   return `${stepsBar(2)}<div class="card" style="max-width:680px"><div class="card-h"><h3>${esc(t('co.title'))}</h3></div>
     <div class="row between" style="margin-bottom:10px"><span class="muted">${esc(t('co.plan'))}</span><b>${esc(planName(tier))}</b></div>
     <div style="margin-bottom:14px">${pers}</div>
     <h4 style="margin:6px 0">${esc(t('co.features'))}</h4><ul class="plan-ul" style="list-style:none;padding:0;display:grid;gap:8px;margin:0 0 14px">${featList(role,tier)}</ul>
-    <div class="row between" style="margin:12px 0;font-size:18px"><span>${esc(t('co.total'))}</span><b>${fmtMoney(PLAN_PRICE[role][tier][per])}</b></div>
+    <div class="row between" style="margin:12px 0;font-size:18px"><span>${esc(t('co.total'))}</span><b>${fmtPlan(PLAN_PRICE[role][tier][per])}</b></div>
     <label class="check" style="margin:10px 0"><input type="checkbox" id="buy-agree" data-ch="buy-agree"> <span>${esc(t('co.agree1'))} <a href="#/rules" data-act="open-rules" style="color:#7c3aed;font-weight:700;text-decoration:underline">${esc(t('co.rules'))}</a> ${esc(t('co.agree2'))}</span></label>
     <p class="xs muted" style="margin-bottom:12px">${esc(t('co.trial'))}</p>
     <div class="row"><a class="btn" href="#/app/buy/info">${esc(t('pi.continue').replace(t('pi.continue'),t('buy.step1')))}</a><button class="btn primary" id="buy-go" data-act="buy-go" disabled>${esc(t('co.cont'))}</button></div></div>`;
@@ -4730,6 +4749,7 @@ document.addEventListener('change',async e=>{
     case 'rep-project':ui.rep.project=el.value;render();break;
     case 'cal-month':{const st=calState();st.m=+el.value;render();break}
     case 'cal-year':{const st=calState(),R=Cal.range(st.sys);st.y=+el.value;if(Cal.cmpYM({y:st.y,m:st.m},R.minYM)<0)st.m=R.minYM.m;if(Cal.cmpYM({y:st.y,m:st.m},R.maxYM)>0)st.m=R.maxYM.m;render();break}
+    case 'cur-set':{const u=me();u.prefs=u.prefs||{};if(CURS[el.value])u.prefs.cur=el.value;save();render();break}
     case 'week-start':{const u=me();u.prefs=u.prefs||{};u.prefs.weekStart=el.value;save();render();break}
     case 'task-field':onTaskFieldChange(el.name);break;
     case 'ask-type':askTypeUi();break;
