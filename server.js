@@ -179,7 +179,7 @@ function cleanOffer(o) {
     payDay: numIn(o.payDay, 1, 28, 10), lateDay: numIn(o.lateDay, 0, 1e9, 0),
     fines: { lateTask: numIn(f.lateTask, 0, 1e9, 100000), earlyBonus: numIn(f.earlyBonus, 0, 1e9, 100000), meeting: numIn(f.meeting, 0, 1e9, 200000), presence: numIn(f.presence, 0, 1e9, 200000), taskPct: numIn(f.taskPct, 0, 100, 10) }
   };
-  if (kind === 'agreed') { r.amount = numIn(o.amount, 0, 1e11, 0); if (r.amount <= 0) return null; }
+  if (kind === 'agreed') { r.amount = numIn(o.amount, 0, 1e9, 0); if (r.amount <= 0) return null; }
   else { r.rateN = numIn(o.rateN, 1, 1e9, 200000); r.rateO = numIn(o.rateO, 0, 1e9, 300000); r.overMax = numIn(o.overMax, 0, 8, 3); }
   return r;
 }
@@ -852,6 +852,8 @@ function timerSummary(inv, nowMs) {
   const a = activeSession(uid);
   return { inviteId: inv.id, offer: { rateN: o.rateN, rateO: o.rateO, overMax: o.overMax, hoursMonth: o.hoursMode === 'day' ? Math.round(o.dailyHours * o.workdays.length * 52 / 12) : o.hoursMonth },
     now: nowMs, today: Object.assign({ day: today, totalMs: days[today] || 0, capMs: capMs(o) }, t), period: Object.assign({ period: per }, mon), warns, fines: fines.map(f => ({ id: f.id, amount: f.amount, at: f.at })),
+    paused: (() => { const pz = activePause(uid); return pz && pz.inviteId === inv.id ? { start: pz.start, autoEnd: new Date(Date.parse(pz.start) + PAUSE_MAX).toISOString() } : null; })(),
+    brk: (() => { const b = activeBreakRec(uid); return b && b.inviteId === inv.id ? { start: b.start, until: new Date(Date.parse(b.start) + BREAK_MS).toISOString() } : null; })(), brkUsed: DB.work.filter(w => w.type === 'break' && w.userId === uid && w.day === today).length, nextBreakMs: Math.max(0, WORK_PHASE - phaseMs(uid, nowMs)),
     active: a && a.inviteId === inv.id ? { id: a.id, start: a.start, countedMs: sessionMs(a, nowMs), check: (a.checks || []).filter(c => !c.answeredAt && Date.parse(c.deadline) > nowMs).map(c => ({ id: c.id, at: c.at, deadline: c.deadline, code: c.code }))[0] || null } : null };
 }
 function stopSession(w, endMs, reason) {
@@ -888,29 +890,56 @@ function releaseLeaveTasks(l) {
 const BREAK_MS = 20 * 60e3, BREAK_GAP = 3 * 3600e3, BREAK_MAX = 3, GAME_GRACE = 60e3;
 const GAMES = ['snake', 'tictactoe', 'g2048', 'memory', 'whack'];
 const GAME_MAX = { snake: 3000, tictactoe: 300, g2048: 500000, memory: 1000, whack: 60 };
-const hmNow = () => new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit', hour12: false }).slice(0, 5);
+let TEST_OFF = 0;
+const hmNow = () => new Date(Date.now() + TEST_OFF).toLocaleTimeString('en-GB', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit', hour12: false }).slice(0, 5);
 const inWin = (f, t, n) => f <= t ? (n >= f && n < t) : (n >= f || n < t);
 const breakContracts = u => DB.invites.filter(i => i.toId === u.id && i.status === 'accepted' && i.offer);
 const breakEligible = u => u.role === 'employee' && breakContracts(u).length > 0;
-function freeTime(u) { // outside every contract's work hours -> play freely
-  const cs = breakContracts(u); if (!cs.length) return false; const n = hmNow();
-  return cs.every(i => /^\d\d:\d\d$/.test(i.offer.workFrom || '') && /^\d\d:\d\d$/.test(i.offer.workTo || '') && i.offer.workFrom !== i.offer.workTo && !inWin(i.offer.workFrom, i.offer.workTo, n));
+function freeTime(u) { // salaried staff: outside every contract's work hours (or without set hours) -> play freely
+  const cs = breakContracts(u).filter(i => i.offer.kind !== 'hourly'); if (!cs.length) return false; const n = hmNow(), wd = (new Date(Date.now() + TEST_OFF + 12600e3).getUTCDay() + 1) % 7;
+  return cs.every(i => { const o = i.offer; if (!/^\d\d:\d\d$/.test(o.workFrom || '') || !/^\d\d:\d\d$/.test(o.workTo || '') || o.workFrom === o.workTo) return true; return !(o.workdays || []).includes(wd) || !inWin(o.workFrom, o.workTo, n); });
+}
+const WORK_PHASE = 3 * 3600e3, PAUSE_MAX = 2 * 3600e3;
+const hourlyOf = u => DB.invites.find(i => i.toId === u.id && i.status === 'accepted' && i.offer && i.offer.kind === 'hourly');
+const activePause = uid => DB.work.find(w => w.type === 'pause' && w.userId === uid && !w.end);
+const activeBreakRec = uid => DB.work.find(w => w.type === 'break' && w.userId === uid && !w.end);
+function phaseMs(uid, now) { // counted working time since the last break ended (today)
+  const day = todayTehran(), lastEnd = DB.work.filter(w => w.type === 'break' && w.userId === uid && w.day === day && w.end).reduce((a, w) => Math.max(a, Date.parse(w.end)), 0);
+  return DB.work.filter(w => w.type === 'session' && w.userId === uid && w.day === day && Date.parse(w.start) >= lastEnd - 1000).reduce((a, w) => a + sessionMs(w, now), 0);
+}
+function agreedBreaks(u, now) {
+  now += TEST_OFF; // salaried staff: breaks follow the clock, 3 h of work then 20 min, up to 3 times
+  const sc = breakContracts(u).find(i => i.offer.kind !== 'hourly' && /^\d\d:\d\d$/.test(i.offer.workFrom || '') && /^\d\d:\d\d$/.test(i.offer.workTo || ''));
+  if (!sc) return { active: null, nextMs: 0 };
+  const o = sc.offer, mn = x => +x.slice(0, 2) * 60 + +x.slice(3), f = mn(o.workFrom), to = mn(o.workTo), n = mn(hmNow());
+  const wd = (new Date(now + 12600e3).getUTCDay() + 1) % 7; if (!(o.workdays || []).includes(wd) || to <= f) return { active: null, nextMs: 0 };
+  const secs = new Date(now + 12600e3), nowSec = (secs.getUTCHours() * 3600 + secs.getUTCMinutes() * 60 + secs.getUTCSeconds()) * 1000, dayStart = now - nowSec;
+  for (let k = 1; k <= BREAK_MAX; k++) {
+    const st = f + k * 180 + (k - 1) * 20; if (st >= to) break;
+    if (n >= st && n < st + 20) return { active: { startMs: dayStart + st * 60e3, untilMs: dayStart + (st + 20) * 60e3 }, nextMs: 0, k };
+    if (n < st) return { active: null, nextMs: dayStart + st * 60e3 };
+  }
+  return { active: null, nextMs: 0 };
 }
 function breakState(u) {
-  const now = Date.now(), day = todayTehran();
-  const mine = DB.work.filter(w => w.type === 'break' && w.userId === u.id).sort((a, b) => a.start.localeCompare(b.start));
-  const last = mine[mine.length - 1];
-  const act = last && !last.end && now < Date.parse(last.start) + BREAK_MS ? last : null;
-  const used = mine.filter(w => w.day === day).length;
-  const nextAt = last ? Date.parse(last.start) + BREAK_GAP : 0;
+  const now = Date.now(), day = todayTehran(), elig = breakEligible(u);
+  const mine = DB.work.filter(w => w.type === 'break' && w.userId === u.id && w.day === day);
+  const hr = elig && hourlyOf(u), ab = elig && !hr ? agreedBreaks(u, now) : { active: null, nextMs: 0 };
+  const rec = activeBreakRec(u.id);
+  let active = rec ? { start: rec.start, until: new Date(Date.parse(rec.start) + BREAK_MS).toISOString() } : null;
+  if (!active && ab.active) active = { start: new Date(ab.active.startMs).toISOString(), until: new Date(ab.active.untilMs).toISOString() };
   const sc = breakContracts(u).find(i => i.offer.workFrom && i.offer.workTo);
-  const elig = breakEligible(u), free = elig && freeTime(u);
-  return { now, eligible: elig, free, schedule: sc ? { from: sc.offer.workFrom, to: sc.offer.workTo } : null, active: act ? { start: act.start, until: new Date(Date.parse(act.start) + BREAK_MS).toISOString() } : null, used, max: BREAK_MAX, nextAt: nextAt > now ? new Date(nextAt).toISOString() : '', canStart: elig && !act && used < BREAK_MAX && now >= nextAt };
+  const idle = !!hr && !activeSession(u.id) && !activePause(u.id) && !rec;
+  const free = elig && (hr ? idle : freeTime(u));
+  let nextAt = ab.nextMs ? new Date(ab.nextMs).toISOString() : '';
+  if (hr && activeSession(u.id) && mine.length < BREAK_MAX) nextAt = new Date(now + Math.max(0, WORK_PHASE - phaseMs(u.id, now))).toISOString();
+  return { now, eligible: elig, hourly: !!hr, free, schedule: sc ? { from: sc.offer.workFrom, to: sc.offer.workTo } : null, active, used: mine.length || (ab.k ? ab.k : 0), max: BREAK_MAX, nextAt };
 }
 function canPlay(u, grace) {
   const st = breakState(u); if (!st.eligible) return false; if (st.free || st.active) return true;
-  if (!grace) return false; const last = DB.work.filter(w => w.type === 'break' && w.userId === u.id).sort((a, b) => b.start.localeCompare(a.start))[0];
-  return !!last && Date.now() < Date.parse(last.start) + BREAK_MS + GAME_GRACE;
+  if (!grace) return false; const ends = [];
+  const last = DB.work.filter(w => w.type === 'break' && w.userId === u.id).sort((a, b) => b.start.localeCompare(a.start))[0]; if (last) ends.push(Date.parse(last.start) + BREAK_MS);
+  return ends.some(e => Date.now() < e + GAME_GRACE);
 }
 function boardOf(u, game, scope) {
   let ids = null;
@@ -923,8 +952,33 @@ function boardOf(u, game, scope) {
   const mi = list.findIndex(w => w.userId === u.id);
   return { top: list.slice(0, 3).map(row), me: mi >= 0 ? row(list[mi], mi) : null, total: list.length };
 }
+function breakTick(now) {
+  let changed = false;
+  for (const pz of DB.work) { // a pause longer than 2 h ends the work day
+    if (pz.type !== 'pause' || pz.end || now < Date.parse(pz.start) + PAUSE_MAX) continue;
+    pz.end = new Date(now).toISOString(); pz.autoEnd = true; changed = true; sendTo(pz.userId, 'timer', {});
+  }
+  for (const b of DB.work) { // a finished break puts the employee back to work automatically
+    if (b.type !== 'break' || b.end || !b.auto || now < Date.parse(b.start) + BREAK_MS) continue;
+    b.end = new Date(Date.parse(b.start) + BREAK_MS).toISOString(); changed = true;
+    const inv = hourlyContract(b.userId, b.inviteId), day = todayTehran();
+    if (inv && !leaveNow(b.userId) && !activeSession(b.userId) && dayMs(b.userId, inv.id, day, now) < capMs(inv.offer))
+      DB.work.push({ id: rid('w_'), type: 'session', userId: b.userId, inviteId: inv.id, day, start: new Date(now).toISOString(), end: '', checks: [], slot: 0, nextCheckAt: new Date(now + (60 + crypto.randomInt(3300)) * 1000).toISOString(), afterBreak: true });
+    sendTo(b.userId, 'timer', {});
+  }
+  for (const w of DB.work) { // 3 h of counted work -> automatic 20-minute break (max 3 a day)
+    if (w.type !== 'session' || w.end) continue;
+    const u = userById(w.userId); if (!u) continue; const day = todayTehran();
+    if (w.day !== day || DB.work.filter(x => x.type === 'break' && x.userId === w.userId && x.day === day).length >= BREAK_MAX) continue;
+    if (phaseMs(w.userId, now) < WORK_PHASE || (w.checks || []).some(c => !c.answeredAt)) continue;
+    stopSession(w, now, 'break');
+    DB.work.push({ id: rid('w_'), type: 'break', userId: w.userId, inviteId: w.inviteId, day, start: new Date(now).toISOString(), end: '', auto: true });
+    pushNotif(w.userId, { type: 'info', text: 'n.breakStart', link: 'timer', key: 'bk:' + w.id }); changed = true; sendTo(w.userId, 'timer', {});
+  }
+  return changed;
+}
 function timerTick() {
-  const now = Date.now(); let changed = applyRates();
+  const now = Date.now(); let changed = applyRates(); if (breakTick(now)) changed = true;
   for (const w of DB.work) {
     if (w.type !== 'session' || w.end) continue;
     if (leaveNow(w.userId)) { stopSession(w, now, 'leave'); changed = true; sendTo(w.userId, 'timer', {}); continue; }
@@ -1019,7 +1073,7 @@ function setInv(x, status, extra) {
 function checkSettled(inv) {
   if (!inv || inv.status !== 'settling') return;
   const mine = DB.invoices.filter(x => x.inviteId === inv.id);
-  if (mine.length && mine.every(x => x.status === 'settled')) {
+  if (mine.every(x => x.status === 'settled')) {
     inv.status = 'ended'; inv.settledAt = nowISO();
     [inv.fromId, inv.toId].forEach(id => pushNotif(id, { type: 'info', text: 'n.settled', params: { name: (userById(inv.toId) || {}).name || '' }, link: 'invoices', key: 'st:' + inv.id }));
   }
@@ -1184,7 +1238,11 @@ async function handle(req, res) {
   if (user.verified === false && !(['/api/state', '/api/events', '/api/resend-verify', '/api/verify-code', '/api/logout'].includes(p))) return send(res, 403, { error: 'unverified' });
 
   if (process.env.VEDILM_TEST && p === '/api/_test/timer' && m === 'POST') { // test-only time travel
-    const b = await readBody(req), w = activeSession(user.id); if (!w) return send(res, 409, { error: 'idle' });
+    const b = await readBody(req);
+    if (b.action === 'clock') { if (!b.hm) TEST_OFF = 0; else { const cur = hmNow().split(':'), want = b.hm.split(':'); TEST_OFF += ((+want[0] * 60 + +want[1]) - (+cur[0] * 60 + +cur[1])) * 60e3; } return send(res, 200, { ok: 1 }); }
+    if (b.action === 'shiftbreak') { const br = activeBreakRec(user.id); if (br) br.start = new Date(Date.parse(br.start) - (+b.ms || 0)).toISOString(); timerTick(); return send(res, 200, { ok: !!br }); }
+    if (b.action === 'shiftpause') { const pz = activePause(user.id); if (pz) pz.start = new Date(Date.parse(pz.start) - (+b.ms || 0)).toISOString(); timerTick(); return send(res, 200, { ok: !!pz }); }
+    const w = activeSession(user.id); if (!w) return send(res, 409, { error: 'idle' });
     if (b.action === 'check') w.nextCheckAt = new Date(Date.now() - 1000).toISOString();
     if (b.action === 'expire') { const c = (w.checks || []).find(x => !x.answeredAt); if (c) c.deadline = new Date(Date.now() - 1000).toISOString(); }
     if (b.action === 'shift') { const ms = +b.ms || 0; w.start = new Date(Date.parse(w.start) - ms).toISOString(); }
@@ -1329,7 +1387,7 @@ async function handle(req, res) {
     if (!inv) return send(res, 404, { error: 'none' });
     if (act === 'propose' && inv.fromId === user.id) {
       const o = inv.offer, patch = {};
-      if (o.kind === 'agreed') patch.amount = numIn(b.amount, 1, 1e11, 0); else { patch.rateN = numIn(b.rateN, 1, 1e9, 0); patch.rateO = numIn(b.rateO, 0, 1e9, 0); patch.overMax = numIn(b.overMax, 0, 8, o.overMax); }
+      if (o.kind === 'agreed') patch.amount = numIn(b.amount, 1, 1e9, 0); else { patch.rateN = numIn(b.rateN, 1, 1e9, 0); patch.rateO = numIn(b.rateO, 0, 1e9, 0); patch.overMax = numIn(b.overMax, 0, 8, o.overMax); }
       if (Object.values(patch).some(v => !(v >= 0)) || (o.kind === 'agreed' ? !patch.amount : !patch.rateN)) return send(res, 400, { error: 'bad' });
       inv.change = { patch, from: nextPeriod(curPeriod()), at: nowISO() };
       pushNotif(inv.toId, { type: 'info', text: 'n.rateProp', params: { name: user.name }, link: 'requests', key: 'rp:' + inv.id + ':' + inv.change.at });
@@ -1352,7 +1410,7 @@ async function handle(req, res) {
     if (act === 'create') {
       const inv = DB.invites.find(i => i.id === String(b.inviteId || '') && i.toId === user.id && i.status === 'accepted' && i.offer);
       const type = String(b.type || ''); if (!inv || !ASK_TYPES.includes(type)) return send(res, 400, { error: 'bad' });
-      const text = (str(b.text, 800) || '').trim(), amount = numIn(b.amount, 0, 1e11, 0);
+      const text = (str(b.text, 800) || '').trim(), amount = numIn(b.amount, 0, 1e9, 0);
       if (type !== 'resign' && text.length < 2) return send(res, 400, { error: 'text' });
       if ((type === 'raise' || type === 'advance') && !(amount > 0)) return send(res, 400, { error: 'amount' });
       if (DB.asks.filter(q => q.userId === user.id && q.status === 'pending').length >= 15) return send(res, 429, { error: 'many' });
@@ -1441,6 +1499,11 @@ async function handle(req, res) {
       setInv(x, 'paid'); pushNotif(x.userId, { type: 'info', text: 'n.invPaid', params: { p: x.period }, link: 'invoices', key: 'ivp:' + x.id });
     } else if (act === 'received' && emp && st === 'paid') {
       setInv(x, 'settled'); pushNotif(x.managerId, { type: 'info', text: 'n.invReceived', params: { name: user.name, p: x.period }, link: 'invoices', key: 'ivr:' + x.id });
+    } else if (act === 'notrecv' && emp && st === 'paid') {
+      const text = (str(b.text, 500) || '').trim(); if (!text) return send(res, 400, { error: 'text' });
+      x.notRecv = { text, at: nowISO() };
+      DB.messages.push({ id: rid('m_'), fromId: user.id, text: ('\u26A0\uFE0F ' + user.name + ' — ' + x.period + ': ' + text).slice(0, 2000), at: nowISO(), scope: 'd', projectId: '', toId: x.managerId });
+      pushNotif(x.managerId, { type: 'info', text: 'n.invNotRecv', params: { name: user.name, p: x.period }, link: 'chat', key: 'ivn:' + x.id + ':' + Date.now() });
     } else return bad();
     x.total = invTotal(x.lines); checkSettled(DB.invites.find(i => i.id === x.inviteId)); persist(); broadcast('changed', {});
     return send(res, 200, { ok: true });
@@ -1466,7 +1529,8 @@ async function handle(req, res) {
     if (!inv) return send(res, 404, { error: 'contract' });
     if (activeSession(user.id)) return send(res, 409, { error: 'running' });
     if (leaveNow(user.id)) return send(res, 409, { error: 'leave' });
-    { const bw = DB.work.filter(x => x.type === 'break' && x.userId === user.id && !x.end).pop(); if (bw) bw.end = nowISO(); }
+    if (activeBreakRec(user.id)) return send(res, 409, { error: 'break' });
+    { const pz = activePause(user.id); if (pz) pz.end = nowISO(); }
     const now = Date.now(), day = todayTehran();
     if (dayMs(user.id, inv.id, day, now) >= capMs(inv.offer)) return send(res, 409, { error: 'day-full' });
     const w = { id: rid('w_'), type: 'session', userId: user.id, inviteId: inv.id, day, start: new Date(now).toISOString(), end: '', checks: [], slot: 0, nextCheckAt: new Date(now + (60 + crypto.randomInt(3300)) * 1000).toISOString() };
@@ -1474,11 +1538,33 @@ async function handle(req, res) {
     return send(res, 200, timerSummary(inv, now));
   }
   if (p === '/api/timer/stop' && m === 'POST') {
-    const w = activeSession(user.id); if (!w) return send(res, 409, { error: 'idle' });
+    const w = activeSession(user.id);
+    if (!w) { // ending work while paused or on a break just closes it
+      const pz = activePause(user.id), br = activeBreakRec(user.id);
+      if (!pz && !br) return send(res, 409, { error: 'idle' });
+      if (pz) pz.end = nowISO(); if (br) br.end = nowISO(); persist(); broadcast('changed', {});
+      const inv0 = DB.invites.find(i => i.id === (pz || br).inviteId); return send(res, 200, timerSummary(inv0, Date.now()));
+    }
     const now = Date.now(), pend = (w.checks || []).find(c => !c.answeredAt);
     stopSession(w, pend ? Math.min(now, Date.parse(pend.at)) : now, 'user'); persist(); broadcast('changed', {});
     const inv = DB.invites.find(i => i.id === w.inviteId);
     return send(res, 200, timerSummary(inv, now));
+  }
+  if (p === '/api/timer/pause' && m === 'POST') {
+    const w = activeSession(user.id); if (!w) return send(res, 409, { error: 'idle' });
+    const now = Date.now(), pend = (w.checks || []).find(c => !c.answeredAt);
+    stopSession(w, pend ? Math.min(now, Date.parse(pend.at)) : now, 'pause');
+    DB.work.push({ id: rid('w_'), type: 'pause', userId: user.id, inviteId: w.inviteId, day: todayTehran(), start: nowISO(), end: '' });
+    persist(); broadcast('changed', {}); return send(res, 200, timerSummary(DB.invites.find(i => i.id === w.inviteId), now));
+  }
+  if (p === '/api/timer/resume' && m === 'POST') {
+    const pz = activePause(user.id); if (!pz) return send(res, 409, { error: 'nopause' });
+    const inv = hourlyContract(user.id, pz.inviteId); if (!inv) return send(res, 404, { error: 'contract' });
+    if (leaveNow(user.id)) return send(res, 409, { error: 'leave' });
+    const now = Date.now(), day = todayTehran(); pz.end = new Date(now).toISOString();
+    if (dayMs(user.id, inv.id, day, now) >= capMs(inv.offer)) { persist(); return send(res, 409, { error: 'day-full' }); }
+    DB.work.push({ id: rid('w_'), type: 'session', userId: user.id, inviteId: inv.id, day, start: new Date(now).toISOString(), end: '', checks: [], slot: 0, nextCheckAt: new Date(now + (60 + crypto.randomInt(3300)) * 1000).toISOString() });
+    persist(); broadcast('changed', {}); return send(res, 200, timerSummary(inv, now));
   }
   if (p === '/api/timer/ping' && m === 'POST') {
     const b = await readBody(req), w = activeSession(user.id); if (!w) return send(res, 409, { error: 'idle' });
@@ -1524,12 +1610,14 @@ async function handle(req, res) {
   }
   if (m === 'GET' && p === '/api/profile-stats') {
     const id = String(url.searchParams.get('id') || ''), o = userById(id);
-    if (!o || (id !== user.id && !DB.invites.some(i => (i.fromId === user.id && i.toId === id) || (i.toId === user.id && i.fromId === id)))) return send(res, 404, { error: 'none' });
-    const done = DB.tasks.filter(x => x.status === 'done' && x.assigneeIds.includes(id)).length;
-    const projs = new Set(); DB.projects.forEach(pr => { if (pr.ownerId === id || pr.members.some(mm => mm.userId === id)) projs.add(pr.id); });
+    const shared = id === user.id || DB.invites.some(i => (i.fromId === user.id && i.toId === id) || (i.toId === user.id && i.fromId === id)) || DB.projects.some(pr => (pr.ownerId === id || pr.members.some(mm => mm.userId === id)) && (pr.ownerId === user.id || pr.members.some(mm => mm.userId === user.id)));
+    if (!o || !shared) return send(res, 404, { error: 'none' });
+    const mine = DB.tasks.filter(x => x.assigneeIds.includes(id)), dn = mine.filter(x => x.status === 'done');
+    const done = dn.length, doneClean = dn.filter(x => !x.reviewReply).length, doneChanged = done - doneClean;
+    const projs = new Set(), active = new Set(); DB.projects.forEach(pr => { if (pr.ownerId === id || pr.members.some(mm => mm.userId === id)) { projs.add(pr.id); if (mine.some(x => x.projectId === pr.id && x.status !== 'done')) active.add(pr.id); } });
     const invs = DB.invites.filter(i => i.toId === id && i.offer), warns = invs.reduce((a, i) => a + (i.taskWarn || 0), 0);
     const fines = DB.work.filter(w => w.type === 'fine' && w.userId === id).length;
-    return send(res, 200, { done, projects: projs.size, warns, fines, errorFree: !warns && !fines, bio: o.bio || '', title: o.title || '', since: o.createdAt });
+    return send(res, 200, { done, doneClean, doneChanged, active: active.size, role: o.role, projects: projs.size, warns, fines, errorFree: !warns && !fines, bio: o.bio || '', title: o.title || '', since: o.createdAt });
   }
   if (m === 'GET' && p === '/api/users/search') {
     const q = String(url.searchParams.get('q') || '').trim().toLowerCase();
@@ -1550,19 +1638,6 @@ async function handle(req, res) {
   }
   if (p === '/api/ai/status' && m === 'GET') return send(res, 200, { enabled: !!aiKey(), limit: aiUserLimit(user), used: aiUsed(user), tier: planState(user).tier });
   if (p === '/api/break' && m === 'GET') return send(res, 200, breakState(user));
-  if (p === '/api/break/start' && m === 'POST') {
-    const st = breakState(user); if (!st.eligible) return send(res, 403, { error: 'role' });
-    if (st.active) return send(res, 200, st);
-    if (st.used >= BREAK_MAX) return send(res, 409, { error: 'daily' });
-    if (!st.canStart) return send(res, 409, { error: 'wait', nextAt: st.nextAt });
-    const a = activeSession(user.id); if (a) { stopSession(a, Date.now(), 'break'); sendTo(user.id, 'timer', {}); }
-    DB.work.push({ id: rid('w_'), type: 'break', userId: user.id, day: todayTehran(), start: nowISO(), end: '' });
-    persist(); broadcast('changed', {}); return send(res, 200, breakState(user));
-  }
-  if (p === '/api/break/end' && m === 'POST') {
-    const w = DB.work.filter(x => x.type === 'break' && x.userId === user.id && !x.end).pop(); if (w) { w.end = nowISO(); persist(); }
-    return send(res, 200, breakState(user));
-  }
   if (p === '/api/game/score' && m === 'POST') {
     const b = await readBody(req), game = String(b.game || ''), sc = Math.floor(+b.score);
     if (!GAMES.includes(game) || !Number.isFinite(sc) || sc < 0 || sc > GAME_MAX[game]) return send(res, 400, { error: 'bad' });
