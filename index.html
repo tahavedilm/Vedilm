@@ -1953,6 +1953,14 @@ Object.assign(DICT,{
 'n.breakStart':["زمان استراحت ۲۰ دقیقه‌ای شد. بازی‌ها باز شدند.", "Break time (20 min). Games are unlocked.", "حان وقت الاستراحة (20 دقيقة). الألعاب مفتوحة.", "休息时间（20分钟），游戏已解锁。"],
 'ask.referSearch':["کد ۶ رقمی همکار", "Colleague's 6-digit code", "الرمز المكون من 6 أرقام للزميل", "同事的6位代码"],
 'ask.pickPerson':["یک نفر را از نتایج انتخاب کنید.", "Pick a person from the results.", "اختر شخصاً من النتائج.", "请从结果中选择一人。"],
+'team.inviteEmp':["دعوت همکار", "Invite colleague", "دعوة زميل", "邀请同事"],
+'tm.forProject':["پروژه", "Project", "المشروع", "项目"],
+'tm.reportTitle':["گزارش پایان کار", "End-of-work report", "تقرير نهاية العمل", "下班报告"],
+'tm.reportInfo':["مدت کار شما {h} ساعت روی «{p}» بوده است. ساعت کار همراه گزارش برای مدیر ارسال می‌شود.", "You worked {h} h on “{p}”. The hours are sent to your manager with this report.", "عملت {h} ساعة على «{p}». تُرسل الساعات مع التقرير للمدير.", "您在“{p}”上工作了 {h} 小时。工时将随报告发送给经理。"],
+'tm.reportEnd':["ارسال و پایان کار", "Send & end work", "إرسال وإنهاء العمل", "发送并结束工作"],
+'tm.reportSent':["گزارش و ساعت کار برای مدیر ارسال شد.", "Report and hours sent to your manager.", "أُرسل التقرير والساعات للمدير.", "报告和工时已发送给经理。"],
+'tm.hoursBadge':["{h} ساعت کار", "{h} h worked", "{h} ساعة عمل", "工作 {h} 小时"],
+'n.workDone':["{name} {h} ساعت روی «{p}» کار کرد و کارش را پایان داد.", "{name} worked {h} h on “{p}” and finished.", "عمل {name} {h} ساعة على «{p}» وأنهى.", "{name} 在“{p}”上工作了 {h} 小时并结束。"],
 });
 
 /* ===== i18n runtime, formatting, overlays, toast, datepicker ===== */
@@ -3171,11 +3179,11 @@ function notifParams(p){if(!p)return {};const o={};for(const k in p){const v=p[k
 function viewTeam(){
   const u=me(),members=teamIds();
   const incoming=db.invites.filter(i=>i.toId===u.id&&(i.status==='pending'||i.status==='discussing')&&userById(i.fromId)),outgoing=db.invites.filter(i=>i.fromId===u.id&&(i.status==='pending'||i.status==='discussing')&&userById(i.toId));
-  const pAll=(isMgr()&&SRV.on?myPeers():[]).filter(x=>userById(peerOther(x))&&x.status!=='declined'),pInc=pAll.filter(x=>x.status==='pending'&&x.toId===u.id),pOut=pAll.filter(x=>x.status==='pending'&&x.fromId===u.id),pOk=pAll.filter(x=>x.status==='accepted');
+  const pAll=(SRV.on?myPeers():[]).filter(x=>userById(peerOther(x))&&x.status!=='declined'),pInc=pAll.filter(x=>x.status==='pending'&&x.toId===u.id),pOut=pAll.filter(x=>x.status==='pending'&&x.fromId===u.id),pOk=pAll.filter(x=>x.status==='accepted');
   const peerIncRow=x=>`<div class="li" style="align-items:flex-start;flex-wrap:wrap">${avatar(x.fromId)}<div class="grow" style="min-width:220px"><div class="t">${esc(uname(x.fromId))} <span class="badge primary">${esc(t('role.manager'))}</span></div><div class="xs muted">${esc(t('peer.invitedYou'))}${x.title?' · '+esc(x.title):''}</div></div><div class="row" style="gap:6px"><button class="btn sm primary" data-act="peer-do" data-k="accept" data-id="${x.id}">${esc(t('of.accept'))}</button><button class="btn sm" data-act="peer-do" data-k="decline" data-id="${x.id}">${esc(t('decline'))}</button></div></div>`;
   const peerOutRow=x=>`<div class="li" style="align-items:flex-start;flex-wrap:wrap">${avatar(x.toId)}<div class="grow" style="min-width:220px"><div class="t">${esc(uname(x.toId))} <span class="badge primary">${esc(t('role.manager'))}</span>${x.title?' · '+esc(x.title):''}</div></div><div class="row" style="gap:6px"><span class="badge warn">${esc(t('team.waiting'))}</span><button class="btn sm" data-act="peer-do" data-k="remove" data-id="${x.id}">${esc(t('cancel'))}</button></div></div>`;
   const peerCard=x=>{const m=peerOther(x),mu=userById(m);return `<article class="card" style="display:grid;gap:10px"><div class="row" style="flex-wrap:nowrap"><button type="button" class="av-btn" data-act="emp-profile" data-id="${m}" aria-label="${esc(t('pf.open'))}" style="padding:0;border:0;background:none;cursor:pointer">${avatar(m,'lg')}</button><div class="grow" style="min-width:0"><h3 style="font-size:16px">${esc(mu.name)}</h3><div class="xs muted" style="overflow:hidden;text-overflow:ellipsis"><bdi>${esc(mu.email)}</bdi></div><span class="badge primary" style="margin-top:6px">${esc(t('role.manager'))}</span></div></div>${x.title?`<div class="small">${ic('tag','sm')} ${esc(x.title)}</div>`:''}<div class="row between"><span class="small muted">${esc(t('peer.viewOnly'))}</span><button class="btn sm danger" data-act="peer-do" data-k="remove" data-id="${x.id}">${esc(t('team.remove'))}</button></div></article>`};
-  const head=pageHead(t('nav.team'),t('team.sub'),isMgr()?`<button class="btn primary" data-act="invite">${ic('user_add','sm')}${esc(t('team.invite'))}</button>`:(hasRequests()?`<button class="btn primary" data-act="ask-refer">${ic('user_add','sm')}${esc(t('ask.t.refer'))}</button>`:''));
+  const head=pageHead(t('nav.team'),t('team.sub'),isMgr()?`<button class="btn primary" data-act="invite">${ic('user_add','sm')}${esc(t('team.invite'))}</button>`:`<button class="btn primary" data-act="invite">${ic('user_add','sm')}${esc(t('team.inviteEmp'))}</button>`);
   const inc=(incoming.length||pInc.length)?`<section class="card" style="margin-bottom:16px;border-color:var(--primary)"><div class="card-h"><h3>${esc(t('team.incoming'))}</h3></div>${pInc.map(peerIncRow).join('')}${incoming.map(i=>`<div class="li" style="align-items:flex-start;flex-wrap:wrap">${avatar(i.fromId)}<div class="grow" style="min-width:220px"><div class="t">${esc(uname(i.fromId))}</div><div class="xs muted">${esc(t('team.invitedYou'))}${i.title?' · '+esc(i.title):''}</div>${offerSummary(i)}${i.status==='discussing'?`<div class="xs" style="margin-top:6px"><span class="badge warn">${esc(t('of.discussing'))}</span></div>`:''}</div><div class="row" style="gap:6px"><button class="btn sm primary" data-act="invite-respond" data-id="${i.id}" data-s="accepted">${esc(t('of.accept'))}</button><button class="btn sm" data-act="offer-report" data-id="${i.id}">${esc(t('of.report'))}</button><button class="btn sm" data-act="invite-respond" data-id="${i.id}" data-s="declined">${esc(t('decline'))}</button></div></div>`).join('')}</section>`:'';
   const out=(outgoing.length||pOut.length)?`<section class="card" style="margin-bottom:16px"><div class="card-h"><h3>${esc(t('team.pending'))}</h3></div>${pOut.map(peerOutRow).join('')}${outgoing.map(i=>`<div class="li" style="align-items:flex-start;flex-wrap:wrap">${avatar(i.toId)}<div class="grow" style="min-width:220px"><div class="t">${esc(uname(i.toId))}${i.title?' · '+esc(i.title):''}</div>${offerSummary(i)}${i.status==='discussing'?`<div class="small" style="margin-top:8px;padding:8px 10px;border-radius:10px;background:var(--surface2)"><b>${esc(t('of.reportBy'))}:</b> ${esc(i.reportText||'')}</div>`:''}</div><div class="row" style="gap:6px"><span class="badge warn">${esc(i.status==='discussing'?t('of.discussing'):t('team.waiting'))}</span>${i.status==='discussing'?`<button class="btn sm" data-act="open-dm" data-id="${i.toId}">${esc(t('of.openChat'))}</button>`:''}<button class="btn sm" data-act="offer-edit" data-id="${i.id}">${esc(t('of.edit'))}</button><button class="btn sm" data-act="invite-cancel" data-id="${i.id}">${esc(t('cancel'))}</button></div></div>`).join('')}</section>`:'';
   const grid=(members.length||pOk.length)?`<div class="pgrid">${pOk.map(peerCard).join('')}${members.map(m=>{const mu=userById(m);const shared=db.projects.filter(p=>projVisible(p,u)&&projVisible(p,mu)).length;const inv=db.invites.find(i=>i.status==='accepted'&&(i.fromId===m&&i.toId===u.id||i.fromId===u.id&&i.toId===m));
@@ -3190,9 +3198,9 @@ function renderInviteResults(w,q){
   const u=me(),nq=normQ(q.trim());
   const paint=list=>{$('#iresults',w).innerHTML=list.length?list.map(x=>`<button type="button" class="li click" style="width:100%;text-align:start;border-radius:10px;padding-inline:8px" data-act="invite-pick" data-id="${x.id}" aria-pressed="${w._sel===x.id}">${avatar(x.id)}<span class="grow"><b>${esc(x.name)}</b><span class="xs muted" style="display:block"><bdi>${esc(x.email)}</bdi></span></span><span class="badge ${x.role==='manager'?'primary':''}">${esc(t('role.'+x.role))}</span>${w._sel===x.id?ic('check','sm'):''}</button>`).join(''):`<p class="muted small">${esc(nq?t('team.noUsers'):t('team.noOthers'))}</p>`};
   if(SRV.on){
-    const cq=codeNorm(q);paint(Object.values(SRV.found).filter(x=>x.id!==u.id&&!inviteStatusOf(x.id)&&!peerRel(x.id)&&cq.length>=6&&x.code===cq));
+    const cq=codeNorm(q);paint(Object.values(SRV.found).filter(x=>x.id!==u.id&&(isMgr()||x.role==='employee')&&!inviteStatusOf(x.id)&&!peerRel(x.id)&&cq.length>=6&&x.code===cq));
     clearTimeout(invTimer);
-    invTimer=setTimeout(async()=>{const r=await api('GET','/api/users/search?q='+encodeURIComponent(q.trim()));if(!r.ok||!w.isConnected)return;r.data.users.forEach(x=>SRV.found[x.id]=x);paint(r.data.users.filter(x=>!inviteStatusOf(x.id)&&!peerRel(x.id)))},q?200:0);
+    invTimer=setTimeout(async()=>{const r=await api('GET','/api/users/search?q='+encodeURIComponent(q.trim()));if(!r.ok||!w.isConnected)return;r.data.users.forEach(x=>SRV.found[x.id]=x);paint(r.data.users.filter(x=>(isMgr()||x.role==='employee')&&!inviteStatusOf(x.id)&&!peerRel(x.id)))},q?200:0);
     return;
   }
   paint(db.users.filter(x=>x.id!==u.id&&!peerRel(x.id)&&!inviteStatusOf(x.id)&&(!nq||normQ(x.name+' '+x.email).includes(nq))).slice(0,8));
@@ -3633,18 +3641,31 @@ function viewTimer(){
   const sel=TMR.contracts.length>1?`<select class="select" data-ch="tm-sel" style="max-width:260px">${TMR.contracts.map(c=>`<option value="${c.id}" ${c.id===TMR.sel?'selected':''}>${esc(c.title||c.projectName||c.id)}</option>`).join('')}</select>`:'';
   const live=a?((a.check&&Date.parse(a.check.deadline)>tmNow())?a.countedMs:a.countedMs+(tmNow()-s.now)):0;
   return `<div class="page-h"><h1>${esc(t('nav.timer'))}</h1>${sel}</div>
-  <div class="card" style="text-align:center;padding:28px"><div class="muted small">${esc(t(a?'tm.running':s.paused?'tm.paused':s.brk?'tm.onBreakS':'tm.idle'))}</div>
+  <div class="card" style="text-align:center;padding:28px">${(a||s.paused||s.brk)&&s.projectId?`<div class="small" style="margin-bottom:4px">${esc(t('tm.forProject'))}: <b>${esc((projById(s.projectId)||{}).name||'')}</b></div>`:''}<div class="muted small">${esc(t(a?'tm.running':s.paused?'tm.paused':s.brk?'tm.onBreakS':'tm.idle'))}</div>
    <div id="tm-clock" dir="ltr" style="font-size:56px;font-weight:800;margin:8px 0">${a?tmDur(live,true):tmDur(0,true)}</div>
    ${a?`<div class="row" style="justify-content:center;gap:10px"><button class="btn" type="button" data-act="tm-pause">${esc(t('tm.pause'))}</button><button class="btn danger" type="button" data-act="tm-stop">${esc(t('tm.stop'))}</button></div>${s.brkUsed<3?`<p class="muted xs" style="margin-top:10px">${esc(t('tm.nextBreak',{n:tmDur(s.nextBreakMs)}))}</p>`:''}`
    :s.paused?`<p class="small" style="margin:4px 0 10px">${esc(t('tm.pausedInfo'))} <b id="tm-pcd" dir="ltr">${tmDur(Date.parse(s.paused.autoEnd)-tmNow(),true)}</b></p><div class="row" style="justify-content:center;gap:10px"><button class="btn primary" type="button" data-act="tm-resume">${esc(t('tm.resume'))}</button><button class="btn danger" type="button" data-act="tm-stop">${esc(t('tm.stop'))}</button></div>`
    :s.brk?`<p class="small" style="margin:4px 0 10px">${esc(t('tm.onBreak'))}</p><button class="btn danger" type="button" data-act="tm-stop">${esc(t('tm.stop'))}</button>`
-   :`<button class="btn primary" type="button" data-act="tm-start" ${td.totalMs>=td.capMs?'disabled':''}>${esc(t('tm.start'))}</button>`}
+   :`${tmProjSelect()}<button class="btn primary" type="button" data-act="tm-start" ${td.totalMs>=td.capMs?'disabled':''}>${esc(t('tm.start'))}</button>`}
    ${td.totalMs>=td.capMs?`<p class="muted small" style="margin-top:10px">${esc(t('tm.dayFull'))}</p>`:''}</div>
   <div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px">
    <div class="card"><div class="muted small">${esc(t('tm.today'))}</div><div style="font-size:22px;font-weight:700" id="tm-today">${tmDur(td.totalMs)}</div><div class="small">${esc(t('tm.normal'))}: ${tmDur(td.normalMs)} · ${esc(t('tm.over'))}: ${tmDur(td.overMs)}</div><div class="small">${fmtMoney(td.amount)}</div></div>
    <div class="card"><div class="muted small">${esc(t('tm.month'))}</div><div style="font-size:22px;font-weight:700">${tmDur(pe.normalMs+pe.overMs)}</div><div class="small">${esc(t('tm.normal'))}: ${tmDur(pe.normalMs)} · ${esc(t('tm.over'))}: ${tmDur(pe.overMs)}</div><div class="small">${fmtMoney(pe.amount)}</div></div>
    <div class="card"><div class="muted small">${esc(t('tm.warns'))}</div><div style="font-size:22px;font-weight:700">${num(s.warns%5)} / ${num(5)}</div>${s.fines.length?`<div class="small">${esc(t('tm.fines'))}: ${s.fines.map(f=>fmtMoney(f.amount)).join('، ')}</div>`:''}<div class="muted xs">${esc(t('tm.warnsNote'))}</div></div></div>
   <p class="muted small" style="margin-top:14px">${esc(t('tm.rates',{n:fmtMoney(o.rateN),o:fmtMoney(o.rateO),m:num(o.overMax)}))}</p>${hasBreak()?gamesSection():''}`;
+}
+
+function tmProjects(){const c=TMR.contracts.find(x=>x.id===TMR.sel);return db.projects.filter(p=>c&&p.ownerId===c.fromId&&p.members.some(mm=>mm.userId===me().id))}
+function tmProjSelect(){const l=tmProjects();if(!l.length)return '';if(!l.some(p=>p.id===TMR.proj))TMR.proj=l[0].id;
+  return `<div class="field" style="max-width:320px;margin:0 auto 12px;text-align:start"><label for="tm-proj">${esc(t('tm.forProject'))}</label><select class="select" id="tm-proj" data-ch="tm-proj">${l.map(p=>`<option value="${p.id}" ${p.id===TMR.proj?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>`}
+async function tmStop(){
+  if(TMR.busy)return;const s=TMR.sum||{};
+  const need=(s.runMs||0)>2*3600e3&&s.projectId&&projById(s.projectId);
+  const go=async rep=>{TMR.busy=true;const r=await api('POST','/api/timer/stop',rep?{report:rep}:{});TMR.busy=false;if(r.ok&&rep){toast(t('tm.reportSent'))}tmApply(r);brkLoad(false)};
+  if(!need)return go(null);
+  const h=Math.floor(s.runMs/3600e3),m=Math.floor(s.runMs%3600e3/60e3);
+  const w=openOverlay(modalShell({title:t('tm.reportTitle'),cls:'sm',body:`<p class="small">${esc(t('tm.reportInfo',{h:num(h+':'+String(m).padStart(2,'0')),p:(projById(s.projectId)||{}).name||''}))}</p><div class="field"><label for="tr-s">${esc(t('dr.subject'))}</label><input class="input" id="tr-s" maxlength="120"></div><div class="field"><label for="tr-t">${esc(t('dr.text'))}</label><textarea class="textarea" id="tr-t" maxlength="3000" style="min-height:120px"></textarea></div><div class="msg" id="tr-e" style="color:var(--bad);font-size:13px"></div>`,footer:`<button class="btn" type="button" data-act="close-ov">${esc(t('cancel'))}</button><button class="btn primary" type="button" data-act="tm-report-go">${esc(t('tm.reportEnd'))}</button>`}));
+  w._go=()=>{const sj=$('#tr-s',w).value.trim(),tx=$('#tr-t',w).value.trim();if(!sj||!tx){$('#tr-e',w).textContent=t('err.required');return}closeAllOverlays();go({subject:sj,text:tx})};
 }
 
 /* ===== break time + mini games ===== */
@@ -3992,7 +4013,7 @@ async function saveRate(id){
 }
 
 /* ----- employee requests: raise, advance, resignation, referral ... ----- */
-const ASK_TYPES=['raise','advance','resign','schedule','equipment','refer','other'];
+const ASK_TYPES=['raise','advance','resign','schedule','equipment','other'];
 function asksHTML(){
   const u=me(),mgr=u.role==='manager';
   return RQ.asks.map(q=>{
@@ -4291,7 +4312,7 @@ const dayLabel=iso=>fmtDate((iso||'').slice(0,10),calSys());
 function reportCard(r,mgr){
   const pr=projById(r.projectId),mine=r.userId===me().id;
   const acts=mgr&&r.status==='pending'?`<button class="btn" type="button" data-act="rpt-no" data-id="${r.id}">${esc(t('dr.reject'))}</button><button class="btn primary" type="button" data-act="rpt-yes" data-id="${r.id}">${esc(t('dr.approve'))}</button>`:(mine&&r.status==='rejected'?`<button class="btn primary" type="button" data-act="rpt-resend" data-id="${r.id}">${esc(t('dr.resend'))}</button>`:'');
-  return `<article class="card" style="margin-bottom:12px"><div class="row between" style="gap:8px;flex-wrap:wrap"><div class="row" style="gap:8px">${avatar(r.userId,'sm')}<b>${esc(uname(r.userId))}</b>${isPro(r.userId)?`<span class="badge primary">${esc(t('dr.pro'))}</span>`:''}${projChip(r.projectId)}</div><span class="xs muted">${esc(dayLabel(r.day))}</span></div>
+  return `<article class="card" style="margin-bottom:12px"><div class="row between" style="gap:8px;flex-wrap:wrap"><div class="row" style="gap:8px">${avatar(r.userId,'sm')}<b>${esc(uname(r.userId))}</b>${isPro(r.userId)?`<span class="badge primary">${esc(t('dr.pro'))}</span>`:''}${projChip(r.projectId)}</div><span class="xs muted">${r.kind==='session'?`<span class="badge">${esc(t('tm.hoursBadge',{h:num(Math.floor(r.hoursMs/3600e3)+':'+String(Math.floor(r.hoursMs%3600e3/60e3)).padStart(2,'0'))}))}</span> `:''}${esc(dayLabel(r.day))}</span></div>
     <h3 style="margin:10px 0 4px;font-size:16px">${esc(r.subject)}</h3><p style="white-space:pre-wrap;word-break:break-word;margin:0">${esc(r.text)}</p>
     ${r.status==='rejected'&&r.note?`<p class="small" style="margin-top:8px;color:var(--bad)">${esc(r.note)}</p>`:''}
     <div class="row between" style="margin-top:10px;flex-wrap:wrap;gap:8px">${stBadge('dr.st.',r.status)}<span class="row" style="gap:8px">${acts}</span></div></article>`;
@@ -4511,7 +4532,7 @@ function chatMsgs(sel){
   if(sel[0]==='a')return db.messages.filter(m=>m.scope==='a').sort((a,b)=>a.at.localeCompare(b.at)||a.id.localeCompare(b.id));
   return db.messages.filter(m=>sel[0]==='p'?(m.scope==='p'&&m.projectId===id):(m.scope==='d'&&((m.fromId===u.id&&m.toId===id)||(m.fromId===id&&m.toId===u.id)))).sort((a,b)=>a.at.localeCompare(b.at)||a.id.localeCompare(b.id));
 }
-function chatPeerIds(){const u=me(),s=new Set(teamIds());db.invites.forEach(i=>{if(i.status!=='discussing'&&i.status!=='settling')return;if(i.fromId===u.id)s.add(i.toId);else if(i.toId===u.id)s.add(i.fromId)});return [...s]}
+function chatPeerIds(){const u=me(),s=new Set(teamIds());db.invites.forEach(i=>{if(i.status!=='discussing'&&i.status!=='settling')return;if(i.fromId===u.id)s.add(i.toId);else if(i.toId===u.id)s.add(i.fromId)});(db.peers||[]).forEach(x=>{if(x.status!=='accepted')return;if(x.fromId===u.id)s.add(x.toId);else if(x.toId===u.id)s.add(x.fromId)});return [...s]}
 function chatChannels(){
   const u=me(),rd=chatReadMap(),out=[];
   const add=(sel,title,sub,avatarHTML)=>{
@@ -4679,8 +4700,8 @@ const ACT={
   'ask-go':()=>{const w=ovStack[ovStack.length-1];w&&w._go&&w._go()},'ask-offer':el=>askOffer(el.dataset.id),
   'ask-cancel':async el=>{await api('POST','/api/ask',{act:'cancel',id:el.dataset.id});await rqLoad()},
   'site-live':()=>siteLive(),
-  'tm-start':async()=>{tmAskNotif();if(TMR.busy)return;TMR.busy=true;const r=await api('POST','/api/timer/start',{inviteId:TMR.sel});TMR.busy=false;tmApply(r)},
-  'tm-stop':async()=>{if(TMR.busy)return;TMR.busy=true;const r=await api('POST','/api/timer/stop',{});TMR.busy=false;tmApply(r);brkLoad(false)},
+  'tm-start':async()=>{tmAskNotif();if(TMR.busy)return;TMR.busy=true;const r=await api('POST','/api/timer/start',{inviteId:TMR.sel,projectId:TMR.proj||''});TMR.busy=false;tmApply(r)},
+  'tm-stop':()=>tmStop(),'tm-report-go':()=>{const w=ovStack[ovStack.length-1];w&&w._go&&w._go()},
   'tm-ping':()=>tmPing(),
 
   'close-ov':()=>closeOverlay(),
@@ -4751,7 +4772,7 @@ const ACT={
   'open-event':el=>{if(String(el.dataset.id).startsWith('pay:'))location.hash='#/app/invoices';else openEventModal(el.dataset.id)},
   'delete-event':el=>{const e=db.events.find(x=>x.id===el.dataset.id);if(!e)return;const snap={...e};db.events=db.events.filter(x=>x.id!==e.id);save();closeAllOverlays();render();toast(t('ev.deleted'),()=>{db.events.push(snap);save();render()})},
   invite:()=>openInviteModal(),
-  'invite-pick':el=>{const w=ovStack[ovStack.length-1];w._sel=el.dataset.id;const pu=SRV.found[w._sel]||userById(w._sel)||{};w._peer=pu.role==='manager';w._code=pu.code||'';renderInviteResults(w,$('#iq',w).value);$('#iform',w).hidden=!!w._peer;$('#pform',w).hidden=!w._peer;$('#isend',w).disabled=false},
+  'invite-pick':el=>{const w=ovStack[ovStack.length-1];w._sel=el.dataset.id;const pu=SRV.found[w._sel]||userById(w._sel)||{};w._peer=pu.role===me().role;w._code=pu.code||'';renderInviteResults(w,$('#iq',w).value);$('#iform',w).hidden=!!w._peer;$('#pform',w).hidden=!w._peer;$('#isend',w).disabled=false},
   'invite-send':()=>sendInvite(),
   'invite-respond':el=>respondInvite(el.dataset.id,el.dataset.s),
   'offer-kind':el=>offerKind(el.dataset.k),'offer-hmode':el=>offerHMode(el.dataset.k),'offer-report':el=>openOfferReportModal(el.dataset.id),'report-send':el=>sendReport(el.dataset.id),'offer-edit':el=>openInviteModal(el.dataset.id),
@@ -4838,6 +4859,7 @@ document.addEventListener('change',async e=>{
     case 'week-start':{const u=me();u.prefs=u.prefs||{};u.prefs.weekStart=el.value;save();render();break}
     case 'task-field':onTaskFieldChange(el.name);break;
     case 'ask-type':askTypeUi();break;
+    case 'tm-proj':TMR.proj=el.value;break;
     case 'sub-toggle':{if(!TM)return;const s=TM.obj.subtasks.find(x=>x.id===el.dataset.sid);if(s){s.done=el.checked;const o=TM.obj;if(o.subtasks.length&&o.subtasks.every(x=>x.done)&&(o.status==='todo'||o.status==='doing')){o.status='review';if(TM.mode==='edit'){o.completedAt='';o.order=nextOrder(o.projectId,'review')+0.5;normalizeOrder(o.projectId,'review');TM.prev.status='review';toast(t('sub.toReview'))}}if(TM.mode==='edit'){save();renderBehind()}refreshTask()}break}
     case 'sub-text':{if(!TM)return;const s=TM.obj.subtasks.find(x=>x.id===el.dataset.sid);if(s){s.t=el.value;if(TM.mode==='edit')save()}break}
   }
